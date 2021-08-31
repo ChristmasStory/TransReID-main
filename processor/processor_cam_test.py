@@ -26,7 +26,7 @@ from pytorch_grad_cam.utils.image import show_cam_on_image, \
                                          preprocess_image
 from utils.condidate_list import save_condidate_list
 
-def reshape_transform(tensor, height=14, width=14):
+def reshape_transform(tensor, height=16, width=16):
     result = tensor[:, 1 :  , :].reshape(tensor.size(0),
         height, width, tensor.size(2))
 
@@ -68,8 +68,9 @@ def do_inference(args,cfg,
 
     model.eval()
     # 求最后一层的梯度
-    # target_layer = model.base.blocks[-1].norm1
-    target_layer = model.bottleneck_4
+    target_layer = model.base.blocks[-2].norm1
+    # target_layer = model.bottleneck
+    # target_layer = model.base.norm
 
     if args.method not in methods:
         raise Exception(f"Method {args.method} not implemented")
@@ -95,7 +96,7 @@ def do_inference(args,cfg,
 
 
 
-    cmc, mAP, _, _, _, _, _, indices, matches = evaluator.compute()
+    cmc, mAP, _, _, _, _, _, indices, matches,q_pids, g_pids, all_AP = evaluator.compute()
 
     for k in model.state_dict():
         print(k)
@@ -105,7 +106,19 @@ def do_inference(args,cfg,
                                use_cuda=args.use_cuda,
                                reshape_transform=reshape_transform)
     rank = 10
-    save_condidate_list(args, cfg, img_path_list, num_query, indices, matches, cam,evaluator.camids,target_views,rank)
+    save_condidate_list(args,
+                        cfg,
+                        img_path_list,
+                        num_query,
+                        indices,
+                        matches,
+                        q_pids,
+                        g_pids,
+                        all_AP,
+                        cam,
+                        evaluator.camids,
+                        target_views,
+                        rank)
 
     logger.info("Validation Results ")
     logger.info("mAP: {:.1%}".format(mAP))

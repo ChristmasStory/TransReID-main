@@ -150,14 +150,25 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
+        # [batch, num_patch+1, token_embed_dim]
         B, N, C = x.shape
+        # qkv(): ->[batch_size, num_patch+1, 3*total_embed_dim]
+        # reshape: -> [batch_size, num_patch+1, 3(p,k,v) , num_heads, embed_dim_per_dim]
+        # permute: -> [3,batch_size, num_heads, num_patch+1, embed_dim_per_head]
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        # [batch_size, num_heads, num_patch+1, embed_dim_per_head]
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
+        # transpose: ->[batch_size, num_heads, embed_dim_per_head, num_patch+1]
+        # @矩阵乘法: [batch_size, num_heads, num_patch+1, num_patch+1](最后两个维度矩阵相乘，对于同一个batch内的同一个head，的q和k进行矩阵相乘)
         attn = (q @ k.transpose(-2, -1)) * self.scale
+        # 对于每一行进行softmax处理
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
+        # @ :[batch_size, num_heads, embed_dim_per_head, num_patch+1]
+        # transpose: [batch_size, embed_dim_per_head, num_heads,  num_patch+1]
+        # reshape: -> [batch_size, num_patch +1 , total_embed_dim]
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -179,6 +190,7 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
+        # 这里的x+是残差的思想
         x = x + self.drop_path(self.attn(self.norm1(x)))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
@@ -203,6 +215,9 @@ class PatchEmbed(nn.Module):
         # FIXME look at relaxing size constraints
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        # proj: 先卷积
+        # flatten: [B,C,H,W] -> [B,C,HW]
+        # transpose: [B,C,HW] -> [B,HW,C]
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
@@ -308,6 +323,7 @@ class TransReID(nn.Module):
 
         num_patches = self.patch_embed.num_patches
 
+        # [1,1,dim]第一个1为batch
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         self.cam_num = camera
@@ -335,6 +351,7 @@ class TransReID(nn.Module):
         print('using drop_path rate is : {}'.format(drop_path_rate))
 
         self.pos_drop = nn.Dropout(p=drop_rate)
+        # dpr: 构建的等差序列，在12个block中的drop_path_rate是递增的，但是目前为0，不递增。
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
 
         self.blocks = nn.ModuleList([
@@ -347,6 +364,7 @@ class TransReID(nn.Module):
 
         # Classifier head
         self.fc = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        # 权重初始化
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embed, std=.02)
 
@@ -375,8 +393,9 @@ class TransReID(nn.Module):
     def forward_features(self, x, camera_id, view_id):
         B = x.shape[0]
         x = self.patch_embed(x)
-
+        # [1,1,768] -> [batch,1,768]
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        # -> [B,197,768]
         x = torch.cat((cls_tokens, x), dim=1)
 
         if self.cam_num > 0 and self.view_num > 0:

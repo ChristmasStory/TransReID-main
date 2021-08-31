@@ -88,7 +88,7 @@ def eval_func(distmat, q_pids, g_pids, q_camids, g_camids, max_rank=50):
     all_cmc = all_cmc.sum(0) / num_valid_q
     mAP = np.mean(all_AP)
 
-    return all_cmc, mAP , indices , matches
+    return all_cmc, mAP , indices , matches, all_AP
 
 
 class R1_mAP_eval():
@@ -138,9 +138,9 @@ class R1_mAP_eval():
         else:
             print('=> Computing DistMat with euclidean_distance')
             distmat = euclidean_distance(qf, gf)
-        cmc, mAP, indices, matches = eval_func(distmat, q_pids, g_pids, q_camids, g_camids)
+        cmc, mAP, indices, matches, all_AP = eval_func(distmat, q_pids, g_pids, q_camids, g_camids)
 
-        return cmc, mAP, distmat, self.pids, self.camids, qf, gf, indices ,matches
+        return cmc, mAP, distmat, self.pids, self.camids, qf, gf, indices ,matches, q_pids, g_pids, all_AP
                # q_camids, q_target_views, g_camids, g_target_views
 
 

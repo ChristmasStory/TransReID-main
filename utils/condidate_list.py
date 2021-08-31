@@ -3,6 +3,7 @@ import os
 from PIL import Image
 import numpy as np
 import torch
+import os.path as osp
 from os import listdir
 import torchvision.transforms as T
 from pytorch_grad_cam.utils.image import show_cam_on_image, \
@@ -105,14 +106,18 @@ def Cam(image_path,cam,cfg,target_view,camid):
     target_view = torch.tensor(target_view, dtype=torch.int64)
     camid = torch.tensor(camid, dtype=torch.int64)
 
-    rgb_img = Image.open(image_path).convert('RGB')
-    # rgb_img = cv2.imread(image_path, 1)[:, :, ::-1]
-    input_tensor = val_transforms(rgb_img)
-    input_tensor.unsqueeze_(0)
-    rgb_img = rgb_img.resize((256, 256), Image.ANTIALIAS)
+    # rgb_img = Image.open(image_path).convert('RGB')
+    # input_tensor = val_transforms(rgb_img)
+    # input_tensor.unsqueeze_(0)
+    # rgb_img = rgb_img.resize((256, 256), Image.ANTIALIAS)
+    # rgb_img = np.float32(rgb_img) / 255
+
+
+    rgb_img = cv2.imread(image_path, 1)[:, :, ::-1]
+    rgb_img = cv2.resize(rgb_img, (256, 256))
     rgb_img = np.float32(rgb_img) / 255
-    # input_tensor = preprocess_image(rgb_img, mean=[0.5, 0.5, 0.5],
-    #                                 std=[0.5, 0.5, 0.5])
+    input_tensor = preprocess_image(rgb_img, mean=[0.5, 0.5, 0.5],
+                                    std=[0.5, 0.5, 0.5])
     # If None, returns the map for the highest scoring category.
     # Otherwise, targets the requested category.
     target_category = None
@@ -134,47 +139,72 @@ def Cam(image_path,cam,cfg,target_view,camid):
     # 是否是等比例缩放?
     return cam_image
 
-def save_condidate_list(args, cfg, img_path_list, num_query, indices, matches, cam=None,camids=None,target_view=None, rank=10 ):
+def save_condidate_list(args, cfg, img_path_list, num_query, indices, matches, q_pids, g_pids, all_AP, cam=None,camids=None,target_view=None, rank=10 ):
     # 查询图像总列表
-    query_img_path_list = np.asarray(img_path_list[:num_query])
+    query_img_path_lists = np.asarray(img_path_list[:num_query])
     # 测试专用，只提取出第一行
-    order = (indices[0,:rank]).astype(np.int32)
-    match = (matches[0,:rank]).astype(np.int32)
+    # order = (indices[0,:rank]).astype(np.int32)
+    # match = (matches[0,:rank]).astype(np.int32)
+    # 提取出所有行的前rank个gallery图像
+    order = (indices[:,:rank]).astype(np.int32)
+    match = (matches[:,:rank]).astype(np.int32)
 
+    mAP_order = []
+    mAP_match = []
+    mAP_q_pid = []
+    query_img_path_list = []
+    num = 0
+    for i in range(num_query):
+        q_pid = q_pids[i]
+        if all_AP[i] < 0.8:
+            mAP_order.append(order[i])
+            mAP_q_pid.append(q_pid)
+            query_img_path_list.append(query_img_path_lists[i])
+            mAP_match.append(match[i])
+            num +=1
+
+    query_img_path_list = np.asarray(query_img_path_list)
+    # gallery_images 是二维的数组
     gallery_img_path_list = np.asarray(img_path_list[num_query:])
-    gallery_images = gallery_img_path_list[order]
+    gallery_images = gallery_img_path_list[mAP_order]
 
     gallery_camids_list = np.asarray(camids[num_query:])
-    gallery_camids = gallery_camids_list[order]
+    gallery_camids = gallery_camids_list[mAP_order]
 
     gallery_target_view_list = np.asarray(target_view[num_query:])
-    gallery_target_view = gallery_target_view_list[order]
+    gallery_target_view = gallery_target_view_list[mAP_order]
 
-    #多张图片合并
-    # def concatenate_img(img_list, img_name, axis=1):
-    #     img_list = [Image.open(img) for img in img_list]
-    #     #只用知道一维就够了，在一维上进行对齐
-    #     img_size_list = [list(img.size) for img in img_list]
-    #     #求第一列最大值
-    #     max_size = np.amax(img_size_list,axis =0)[0]
-    #     # 存储最终的结果
-    #     last_img_list = []
-    #     for i in range(len(img_list)):
-    #         last_img_list.append(img_list[i].resize((max_size,int(img_size_list[i][1] * max_size / img_size_list[i][0])),Image.ANTIALIAS))
-    #
-    #     img = np.concatenate(([i for i in last_img_list]), axis=axis)
-    #     img.save(img_name)
+    # 设置存储路径
+    save_root_dir = os.path.join(cfg.OUTPUT_DIR,'result')
+    save_cam_image = os.path.join(save_root_dir, 'cam_images')
+    if not osp.exists(save_cam_image):
+        os.makedirs(save_cam_image)
+    print(num)
+    for i in range(num):
+        print(i)
+        # 取query图像
+        query_path = os.path.join(cfg.DATASETS.ROOT_DIR,'VeRi/image_query',query_img_path_list[i])
+        query_img = cv2.imread(query_path)
+        file_name = query_img_path_list[i].split('.')[0]
+        # save_path = ../log/veri_base/result/query_name
+        save_path = os.path.join(save_root_dir,file_name)
+        if not osp.exists(save_path):
+            os.makedirs(save_path)
+        cv2.imwrite(os.path.join(save_path,'query.jpg'),query_img)
 
-    #取前10个gallery图像做condidate list
+        # 取前10个gallery图像做condidate list
+        gallery_images_path = []
+        for j in range(rank):
+            gallery_images_path.append(os.path.join(cfg.DATASETS.ROOT_DIR,'VeRi/image_test',gallery_images[i][j]))
+        gallery_cam_image = []
+        gallery_images = []
+        for k in range(len(gallery_images_path)):
+            gallery_cam_image.append(Cam(gallery_images_path[k],cam,cfg,gallery_target_view[i][k],gallery_camids[i][k]))
 
-    query_path = os.path.join(cfg.DATASETS.ROOT_DIR,'VeRi/image_query',query_img_path_list[0])
-    query_img = cv2.imread(query_path)
-    cv2.imwrite('./query1.jpg',query_img)
-    gallery_images_path = []
-    for i in range(rank):
-        gallery_images_path.append(os.path.join(cfg.DATASETS.ROOT_DIR,'VeRi/image_test',gallery_images[i]))
-    gallery_images = []
-    for i in range(len(gallery_images_path)):
-        gallery_images.append(Cam(gallery_images_path[i],cam,cfg,gallery_target_view[i],gallery_camids[i]))
+        for k in range(len(gallery_cam_image)):
+            g_save_path = os.path.join(save_path,'{}.jpg'.format(k))
 
-    concatenate_img(gallery_images, match,img_name='./gallery1.jpg')
+            cv2.imwrite(g_save_path,gallery_cam_image[k])
+
+        gallery_save_path = os.path.join(save_cam_image,'{}.jpg'.format(file_name))
+        concatenate_img(gallery_cam_image, mAP_match[i],img_name=gallery_save_path)

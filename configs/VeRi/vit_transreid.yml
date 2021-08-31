@@ -56,6 +56,6 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
 
-OUTPUT_DIR: '../logs/veri_vit_transreid'
+OUTPUT_DIR: '/data/HanShuai/transreid/logs/veri_vit_transreid'
 
 

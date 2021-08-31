@@ -24,6 +24,7 @@ class ActivationsAndGradients:
             grad = self.reshape_transform(grad,height=16,width=16)
         self.gradients = [grad.cpu().detach()] + self.gradients
 
+
     def __call__(self, x, camid, target_view):
         self.gradients = []
         self.activations = []        
